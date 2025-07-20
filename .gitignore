@@ -191,7 +191,11 @@ cython_debug/
 #  exclude from AI features like autocomplete and code analysis. Recommended for sensitive data
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
+<<<<<<< HEAD
 .cursorindexingignore
 
 # mac file
 .DS_Store
+=======
+.cursorindexingignore
+>>>>>>> f4b080aa9259de9b3a85b6a2eef31026e402fec9
