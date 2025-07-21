@@ -3,6 +3,7 @@ from flask import request, jsonify, current_app
 from datetime import datetime, timedelta, timezone
 import json
 import sqlite3 # Import for specific DB exceptions
+import traceback 
 import urllib.request
 
 from . import clan_bp # Import the blueprint instance
@@ -226,15 +227,31 @@ def get_current_war_detail(clan_tag: str):
     conn = get_db()
     status_code = 200
     try:
-        sql ='SELECT cocdata, dataTime  FROM warlog where tag = ? ORDER BY dataTime DESC limit 1'
+
+        sql = 'SELECT cocdata FROM clan where tag = ? ORDER BY dataTime DESC limit 1'
+        clan_data_row = conn.execute(sql, (clan_tag,)).fetchone()
+        if not clan_data_row:
+            error_msg = f"no clan data of {clan_tag}"
+            current_app.logger.info(error_msg)
+            return jsonify({'error': error_msg}), 404
+        clan_data = json.loads(clan_data_row['cocdata'])
+        if 'isWarLogPublic' not in clan_data or not clan_data['isWarLogPublic']:
+            error_msg = f"clan {clan_tag} war log not available"
+            current_app.logger.info(error_msg)
+            return jsonify({'error': error_msg}), 404
+
+        sql = 'SELECT cocdata, dataTime  FROM warlog where tag = ? ORDER BY dataTime DESC limit 1'
         db_data = conn.execute(sql, (clan_tag,)).fetchone()
     
         if db_data:
             cocdata = db_data['cocdata']
             war_data = json.loads(bytes(db_data['cocdata']).decode('utf-8'))
             war_state = war_data.get('state', '')
-            if (war_state == 'inWar' and 
-                (datetime.now() - datetime.strptime(db_data['dataTime'], '%Y-%m-%d %H:%M:%S')).total_seconds() > 900):
+            if war_state == 'inWar':
+                time_range = 900
+            else:
+                time_range = 82800
+            if (datetime.now() - datetime.strptime(db_data['dataTime'], '%Y-%m-%d %H:%M:%S')).total_seconds() > time_range:
                 fetch_from_api = True
             else:
                 fetch_from_api = False
@@ -248,7 +265,6 @@ def get_current_war_detail(clan_tag: str):
                     data_type = 'currentwar',
                     tag_value = clan_tag
                     )
-
             war_data = json.loads(api_response_data)
             if status_code == 200:
                 if 'endTime' in war_data:
@@ -266,23 +282,19 @@ def get_current_war_detail(clan_tag: str):
                 conn.commit()
                 if 'clan' in war_data:
                     war_data['clan']['tag'] = '#' + clan_tag
-            elif 'error' not in war_data:
-                war_data['error'] = f"unexpected error from fetch coc api data call, status {status_code}"
-                
+            else:
+                if 'error' not in war_data:
+                    war_data['error'] = f"unexpected error from fetch coc api data call, status {status_code}"
+           
             if 'clan' in war_data:
                 war_data['clan']['tag'] = '#' + clan_tag
- 
 
-        db_data = conn.execute("SELECT cocdata FROM clan where tag = ? ORDER BY dataTime DESC limit 1", (clan_tag,)).fetchone()
-        clan_data = json.loads(bytes(db_data['cocdata']).decode('utf-8'))
         war_data['isWarLogPublic'] = clan_data['isWarLogPublic']
 
     finally:
         close_db()
 
     return jsonify(war_data), status_code
-
-
 
 @clan_bp.route('/warlog/<clan_tag>', methods=['GET'])
 def get_clan_war_history(clan_tag: str):
@@ -351,4 +363,61 @@ def get_wardetail(clan_tag: str, war_date: str):
         close_db()
     return jsonify(war_data), status_code
 
-    
+@clan_bp.route('/fetch/<clan_tag>', defaults={'t_range': '82801'}, methods=['GET'])
+@clan_bp.route('/fetch/<clan_tag>/<t_range>', methods=['GET'])
+def cocclan(clan_tag: str, t_range: str = '82801'):
+    time_range = int(t_range)
+    conn = get_db()
+    status_code = 200
+    try:
+        sql = 'SELECT cocdata, dataTime FROM clan where tag = ? ORDER BY dataTime DESC limit 1'
+        db_data = conn.execute(sql, (clan_tag, )).fetchone()
+        if db_data:
+            db_data_time = datetime.strptime(db_data['dataTime'], '%Y-%m-%d %H:%M:%S')
+            if (datetime.now() - db_data_time).total_seconds() > time_range:
+                fetch_from_api = True
+            else:
+                fetch_from_api = False
+                coc_data = db_data['cocdata']
+        else:
+            fetch_from_api = False
+
+        if fetch_from_api:
+            base_api_url = 'https://api.clashofclans.com/v1/clans/%23' + urllib.parse.quote(clan_tag)
+            coc_data, status_code = fetch_coc_api_data(
+                    endpoint = base_api_url,
+                    data_type = 'clan',
+                    tag_value = clan_tag
+                    )
+            clan_data = json.loads(coc_data)
+            if status_code == 200:
+
+                sql = 'INSERT OR REPLACE INTO clan (tag, cocdata) VALUES (?, ?)'
+                conn.execute(sql, (clan_tag, coc_data))
+                conn.commit()
+
+            elif 'error' in clan_data:
+                error_msg = f"unexpected error from coc clan api call of {clan_tag}, status {status_code}: "
+                error_msg += f"{clan_data['error']}"
+                current_app.logger.warning(error_msg)
+            else:
+                current_app.logger.warning(f"unexpected error from coc clan api call of {clan_tag}, status {status_code}")
+                return {'error': f"unexpected error from fetch coc api data call, status {status_code}"}, 500
+
+        return coc_data, status_code
+
+    except json.JSONDecodeError as e:
+        current_app.logger.error(f"clan fetch JSON decoding error for {clan_tag}: {e}\n{traceback.format_exc()}")
+        return {'error': f"clan fetch returned malformed data for {clan_tag}"}, e.code
+
+    except Exception as e:
+        error_msg = f"player fetch unexpected error occurred {clan_tag}: {e}\n{traceback.format_exc()}"
+        current_app.logger.critical (error_msg)
+        return {'error': 'An unexpected internal server error occured.'}, 500
+
+    finally:
+        close_db()
+
+
+
+

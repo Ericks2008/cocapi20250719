@@ -298,4 +298,49 @@ def cwl_summary(clan_tag: str, season: str):
 
     return jsonify(cwl_data), 200 # Always return jsonify and a status code
 
-    
+@cwl_bp.route('/fetch/<clan_tag>', methods=['GET'])
+def read_from_coccwl(clan_tag: str):
+    conn = get_db()
+    try:
+        base_api_url = 'https://api.clashofclans.com/v1/clans/%23' + urllib.parse.quote(clan_tag) + '/currentwar/leaguegroup' 
+        api_response_data, status_code = fetch_coc_api_data(
+                endpoint = base_api_url,
+                data_type = 'cwl',
+                tag_value = clan_tag
+                )
+
+        cwl_data = json.loads(api_response_data)
+        if status_code == 200:
+            if 'season' in cwl_data:
+                season = cwl_data['season']
+                sql = 'INSERT OR REPLACE INTO clanwarleague (clanSeason, tag, cocdata, season) VALUES (?, ?, ?, ?)'
+                conn.execute(sql, (clan_tag + season, clan_tag, cocdata, season)) 
+                conn.commit()
+            else:
+                error_msg = f"season missing in coc cwl api call of {clan_tag}"
+                current_app.logger.warning(error_msg)
+                cwl_data['error'] = error_msg
+
+        elif 'error' in cwl_data:
+            error_msg = f"unexpected error from coc cwl api call of {clan_tag}, status {status_code}: "
+            error_msg += f"{cwl_data['error']}"
+            current_app.logger.warning(error_msg)
+        else:
+            current_app.logger.warning(f"unexpected error from coc cwl api call of {clan_tag}, status {status_code}")
+            cwl_data['error'] = f"unexpected error from fetch coc api data call, status {status_code}"
+
+        return jsonify(cwl_data), status_code
+
+
+    except json.JSONDecodeError as e:
+        current_app.logger.error(f"cwl fetch JSON decoding error for {clan_tag}: {e}\n{traceback.format_exc()}")
+        return {'error': f"cwl fetch returned malformed data for {clan_tag}"}, e.code
+
+    except Exception as e:
+        error_msg = f"cwl fetch unexpected error occurred {clan_tag}: {e}\n{traceback.format_exc()}"
+        current_app.logger.critical (error_msg)
+        return {'error': 'An unexpected internal server error occured.'}, 500
+
+    finally:
+        close_db()
+

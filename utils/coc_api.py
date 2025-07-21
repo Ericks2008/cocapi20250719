@@ -39,7 +39,7 @@ def fetch_coc_api_data(endpoint: str, data_type: str, tag_value: str):
         try:
             error_details = e.read().decode('utf-8')
             current_app.logger.warning(f"CoC API Error Response Body: {error_details}")
-            return json.loads(error_details), e.code
+            return error_details, e.code
         except Exception as read_e:
             current_app.logger.warning(f"Could not read error body from CoC API: {read_e}")
             return {'error': f"Failed to fetch {data_type} {tag_value}. CoC API returned status {read_e.code}"}, read_e.code

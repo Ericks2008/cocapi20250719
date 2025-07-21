@@ -1,12 +1,16 @@
 # ./api/player/routes.py
 from flask import request, jsonify, current_app
+from datetime import datetime, timedelta
+
+import copy
 import json
+import sqlite3 # Import for specific DB exceptions
+import traceback 
+import urllib.request
+
 from . import player_bp # Import the blueprint instance
 from ...utils.db import get_db, close_db # Import common function
-import sqlite3 # Import for specific DB exceptions
-from datetime import datetime, timedelta
-import traceback 
-import copy
+from ...utils.coc_api import fetch_coc_api_data
 
 progressItem = {'warStars':1,
     'attackWins':1,
@@ -181,5 +185,60 @@ def get_player_progress_data(player_tag):
 
     close_db()
     return jsonify(player_data)
+
+
+@player_bp.route('/fetch/<player_tag>', defaults={'t_range': '82800'}, methods=['GET'])
+@player_bp.route('/fetch/<player_tag>/<t_range>', methods=['GET'])
+def cocplayer(player_tag: str, t_range: str = '82800'):
+    time_range = int(t_range)
+    conn = get_db()
+    status_code = 200
+    try:
+        sql = 'SELECT cocdata, dataTime FROM player where tag = ? ORDER BY dataTime DESC limit 1'
+        db_data = conn.execute(sql, (player_tag, )).fetchone()
+        if db_data:
+            db_data_time = datetime.strptime(db_data['dataTime'], '%Y-%m-%d %H:%M:%S')
+            if (datetime.now() - db_data_time).total_seconds() > time_range:
+                fetch_from_api = True
+            else:
+                fetch_from_api = False
+                coc_data = db_data['cocdata']
+        else:
+            fetch_from_api = False
+        if fetch_from_api:
+            base_api_url = 'https://api.clashofclans.com/v1/players/%23' + urllib.parse.quote(player_tag)
+            coc_data, status_code = fetch_coc_api_data(
+                    endpoint = base_api_url,
+                    data_type = 'player',
+                    tag_value = player_tag
+                    )
+            player_data = json.loads(coc_data)
+            if status_code == 200:
+
+                sql = 'INSERT OR REPLACE INTO player (tag, cocdata) VALUES (?, ?)'
+                conn.execute(sql, (player_tag, coc_data))
+                conn.commit()
+
+            elif 'error' in player_data:
+                error_msg = f"unexpected error from coc api call, status {status_code}: {player_data['error']}"
+                current_app.logger.warning(error_msg)
+            else:
+                current_app.logger.warning(f"unexpected error from coc api call, status {status_code}")
+                return {'error': f"unexpected error from fetch coc api data call, status {status_code}"}, 500
+
+        return coc_data, status_code
+
+    except json.JSONDecodeError as e:
+        current_app.logger.error(f"player fetch JSON decoding error for {player_tag}: {e}\n{traceback.format_exc()}")
+        return {'error': f"player fetch returned malformed data for {player_tag}"}, e.code
+
+    except Exception as e:
+        error_msg = f"player fetch unexpected error occurred {player_tag}: {e}\n{traceback.format_exc()}"
+        current_app.logger.critical (error_msg)
+        return {'error': 'An unexpected internal server error occured.'}, 500
+
+    finally:
+        close_db()
+
 
 
