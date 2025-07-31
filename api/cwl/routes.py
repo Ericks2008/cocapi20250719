@@ -262,6 +262,9 @@ def cwl_summary(clan_tag: str, season: str):
                 member_position = last_position
                 last_position += 1
 
+            while member_position in memberseq:
+                member_position += 0.1
+                
             member_data['mapPosition'] = member_position
             memberseq[member_position] = member_tag
 
