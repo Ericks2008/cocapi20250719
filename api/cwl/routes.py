@@ -82,7 +82,7 @@ def _get_cwl_data_from_db(clan_tag: str, req_season: str = None):
                 cwl_data['name'] = json.loads(data['cocdata'])
                 status_code = 200
             else:
-                app.logger.warning (f"get_cwl_season_data {clan_tag} no clan data")
+                current_app.logger.warning (f"get_cwl_season_data {clan_tag} no clan data")
     except Exception as e:
         error_msg = f"Critical error in _get_cwl_data_from_db for {clan_tag}: {e}\n{traceback.format_exc()}"
         current_app.logger.critical(error_msg)
@@ -95,7 +95,7 @@ def _get_cwl_data_from_db(clan_tag: str, req_season: str = None):
 @cwl_bp.route('/wartag/<war_tag>/<season>', methods=['GET'])
 def db_wartag(war_tag, season):
     war_data, status_code = _get_war_data_cached_or_api(war_tag, season)
-    return jsonify(war_data), status_code
+    return war_data, status_code
 
 def _get_war_data_cached_or_api(war_tag: str, season: str):
     conn = get_db()
@@ -107,7 +107,8 @@ def _get_war_data_cached_or_api(war_tag: str, season: str):
 
         if db_record:
             try:
-                return_data = json.loads(bytes(db_record['cocdata']).decode('utf-8'))
+                return_data = db_record['cocdata']
+                return_data = json.loads(bytes(return_data).decode('utf-8'))
                 cache_hit = True
             except json.JSONDecodeError as e:
                 error_msg = f"DB cached war_data JSON decode error for seasonWarTag {season + war_tag}: {e}\n"
@@ -135,6 +136,7 @@ def _get_war_data_cached_or_api(war_tag: str, season: str):
                 error_msg = f"Serving {war_tag} season {season} from cache (state: {war_state}, "
                 error_msg += f"age: {int(time_since_last_fetch)}s)."
                 current_app.logger.info(error_msg)
+                return_data = db_record['cocdata']
                 status_code = 200
         else:
             current_app.logger.info(f"No cached data found for {war_tag} season {season}, fetching from CoC API.")
@@ -143,7 +145,7 @@ def _get_war_data_cached_or_api(war_tag: str, season: str):
     except Exception as e:
         error_msg = f"Unexpected error in db_wartag for {war_tag} season {season}: {e}\n{traceback.format_exc()}"
         current_app.logger.critical(error_msg)
-        return_data = {'error': 'An internal server error occurred while retrieving war data.'}
+        return_data = jsonify({'error': 'An internal server error occurred while retrieving war data.'})
         status_code = 500
 
     finally:
@@ -317,7 +319,7 @@ def read_from_coccwl(clan_tag: str):
             if 'season' in cwl_data:
                 season = cwl_data['season']
                 sql = 'INSERT OR REPLACE INTO clanwarleague (clanSeason, tag, cocdata, season) VALUES (?, ?, ?, ?)'
-                conn.execute(sql, (clan_tag + season, clan_tag, cocdata, season)) 
+                conn.execute(sql, (clan_tag + season, clan_tag, api_response_data, season)) 
                 conn.commit()
             else:
                 error_msg = f"season missing in coc cwl api call of {clan_tag}"
