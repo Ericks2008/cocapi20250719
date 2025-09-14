@@ -98,6 +98,7 @@ def db_wartag(war_tag, season):
     return war_data, status_code
 
 def _get_war_data_cached_or_api(war_tag: str, season: str):
+    # return_data = None or json dumps data, status_code = 200
     conn = get_db()
     return_data = None
     status_code = 200
@@ -132,28 +133,31 @@ def _get_war_data_cached_or_api(war_tag: str, season: str):
                 war_state not in ['warEnded', 'notInWar']:
                 current_app.logger.info(f"Cached data for {war_tag} season {season} is stale or not final; refreshing.")
                 return_data, status_code = _fetch_and_store_war_data(war_tag, season) # Fallback to fetching from CoC API
+                return_data = json.loads(return_data)
             else:
                 error_msg = f"Serving {war_tag} season {season} from cache (state: {war_state}, "
                 error_msg += f"age: {int(time_since_last_fetch)}s)."
                 current_app.logger.info(error_msg)
-                return_data = db_record['cocdata']
                 status_code = 200
         else:
             current_app.logger.info(f"No cached data found for {war_tag} season {season}, fetching from CoC API.")
             return_data, satus_code = _fetch_and_store_war_data(war_tag, season) # Fallback to fetching from CoC API
+            return_data = json.loads(return_data)
 
     except Exception as e:
         error_msg = f"Unexpected error in db_wartag for {war_tag} season {season}: {e}\n{traceback.format_exc()}"
         current_app.logger.critical(error_msg)
-        return_data = jsonify({'error': 'An internal server error occurred while retrieving war data.'})
+        return_data = {'error': 'An internal server error occurred while retrieving war data.'}
         status_code = 500
 
     finally:
         close_db()
-
-    return return_data, status_code
+    #error_msg = f"return_data {type(return_data)}"
+    #current_app.logger.info(error_msg)
+    return json.dumps(return_data), status_code
 
 def _fetch_and_store_war_data(war_tag: str, season: str):
+    # return json dump data, status_code
     conn = get_db()
     current_season = str(datetime.now())[:7]
     base_api_url = 'https://api.clashofclans.com/v1/clanwarleagues/wars/%23' + urllib.parse.quote(war_tag)
@@ -170,7 +174,7 @@ def _fetch_and_store_war_data(war_tag: str, season: str):
             current_app.logger.info(f"wartag db successfully updated {war_tag} {season}")
         return api_response_data, status_code
     else:
-        return jsonify({'error': f"Not current season {season} {war_tag}"}), 500
+        return json.dumps({'error': f"Not current season {season} {war_tag}"}), 500
          
  
 @cwl_bp.route('/summary/<clan_tag>/<season>', methods=['GET'])
@@ -213,6 +217,9 @@ def cwl_summary(clan_tag: str, season: str):
 
             # Call the internal helper function to get war data
             war_data, war_status_code = _get_war_data_cached_or_api(wartag_full[1:], cwl_data['season'])
+            # error_msg = f"{type(war_data)}"
+            # current_app.logger.info(error_msg)
+            war_data = json.loads(war_data)
 
             if war_status_code == 200 and war_data:
                 # Ensure the war_data has expected keys before accessing

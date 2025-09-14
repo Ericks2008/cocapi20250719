@@ -204,7 +204,7 @@ def cocplayer(player_tag: str, t_range: str = '82800'):
                 fetch_from_api = False
                 coc_data = db_data['cocdata']
         else:
-            fetch_from_api = False
+            fetch_from_api = True
         if fetch_from_api:
             base_api_url = 'https://api.clashofclans.com/v1/players/%23' + urllib.parse.quote(player_tag)
             coc_data, status_code = fetch_coc_api_data(

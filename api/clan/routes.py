@@ -220,10 +220,10 @@ def get_clan_progress_data(clan_tag, achievement:None):
     close_db()
     return jsonify(clan_data)
 
-
-@clan_bp.route('/currentwar/<clan_tag>', methods=['GET'])
-def get_current_war_detail(clan_tag: str):
-    current_app.logger.info(f"involve currentwar {clan_tag} ")
+@clan_bp.route('/currentwar/<clan_tag>/<get_now>', methods=['GET'])
+@clan_bp.route('/currentwar/<clan_tag>', defaults={'get_now': None}, methods=['GET'])
+def get_current_war_detail(clan_tag: str, get_now: None):
+    # current_app.logger.info(f"involve currentwar {clan_tag} ")
     conn = get_db()
     status_code = 200
     try:
@@ -236,7 +236,7 @@ def get_current_war_detail(clan_tag: str):
             return jsonify({'error': error_msg}), 404
         clan_data = json.loads(clan_data_row['cocdata'])
         if 'isWarLogPublic' not in clan_data or not clan_data['isWarLogPublic']:
-            error_msg = f"clan {clan_tag} war log not available"
+            error_msg = f"clan {clan_tag} war log not public"
             current_app.logger.info(error_msg)
             return jsonify({'error': error_msg}), 404
 
@@ -256,6 +256,9 @@ def get_current_war_detail(clan_tag: str):
             else:
                 fetch_from_api = False
         else:
+            fetch_from_api = True
+
+        if get_now:
             fetch_from_api = True
 
         if fetch_from_api:
@@ -356,9 +359,9 @@ def get_wardetail(clan_tag: str, war_date: str):
         clan_data = json.loads(bytes(db_data['cocdata']).decode('utf-8'))
         war_data['isWarLogPublic'] = clan_data['isWarLogPublic']
     except json.JSONDecodeError as e:
-        self.logger.error(f"JSONDecodeError for war detail of {clan_tag} of {war_date} : {e}")
+        current_app.logger.error(f"JSONDecodeError for war detail of {clan_tag} of {war_date} : {e}")
     except Exception as e:
-        self.logger.exception(f"Unexpected error during get wardetail call {clan_tag} of {war_date}: {e}")
+        current_app.logger.exception(f"Unexpected error during get wardetail call {clan_tag} of {war_date}: {e}")
     finally: 
         close_db()
     return jsonify(war_data), status_code
